@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diario de Salud de Mamá</title>
+  
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <script crossorigin src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts/umd/Recharts.js"></script>
+  
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } = window.Recharts;
+
+    // --- Adaptación del almacenamiento para el navegador ---
+    window.storage = {
+      get: async (key) => {
+        const val = localStorage.getItem(key);
+        return val ? { value: val } : null;
+      },
+      set: async (key, val) => {
+        localStorage.setItem(key, val);
+      }
+    };
+    // -------------------------------------------------------
+
+    const toDateStr = (d = new Date()) => d.toISOString().split("T")[0];
+
+    const getWeekLabel = (dateStr) => {
+      const d = new Date(dateStr + "T12:00:00");
+      return d.toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+    };
+
+    const STORAGE_KEY = "mama-salud-v2";
+
+    const ENCOURAGEMENTS = [
+      "¡Buen trabajo! 🌸", "¡Eres una campeona! 💪",
+      "¡Sigue así! ⭐", "¡Qué orgullo! 🌺",
+      "¡Imparable! 🔥", "¡Un pasito más! 👏"
+    ];
+
+    const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+    // Eliminamos 'export default' ya que ahora se ejecuta directamente en el HTML
+    function App() {
+      const [habits, setHabits] = useState({});
+      const [weights, setWeights] = useState({});
+      const [weightInput, setWeightInput] = useState("");
+      const [toast, setToast] = useState(null);
+      const [loaded, setLoaded] = useState(false);
+      const [tab, setTab] = useState("today");
+
+      useEffect(() => {
+        (async () => {
+          try {
+            const r = await window.storage.get(STORAGE_KEY);
+            if (r) {
+              const d = JSON.parse(r.value);
+              setHabits(d.habits || {});
+              setWeights(d.weights || {});
+            }
+          } catch {}
+          setLoaded(true);
+        })();
+      }, []);
+
+      const persist = async (h, w) => {
+        try { await window.storage.set(STORAGE_KEY, JSON.stringify({ habits: h, weights: w })); } catch {}
+      };
+
+      const showToast = (msg, special = false) => {
+        setToast({ msg, special });
+        setTimeout(() => setToast(null), 2800);
+      };
+
+      const todayStr = toDateStr();
+      const todayHabits = habits[todayStr] || { diet: false, exercise: false, steps: false };
+
+      const toggle = async (key) => {
+        const next = { ...todayHabits, [key]: !todayHabits[key] };
+        const newH = { ...habits, [todayStr]: next };
+        setHabits(newH);
+        await persist(newH, weights);
+        const all = next.diet && next.exercise && next.steps;
+        if (all) showToast("¡LO CONSEGUISTE TODO HOY! 🎉🎉🎉", true);
+        else if (next[key]) showToast(rand(ENCOURAGEMENTS));
+      };
+
+      const saveWeight = async () => {
+        const val = parseFloat(weightInput.replace(",", "."));
+        if (isNaN(val) || val < 30 || val > 250) {
+          showToast("Introduce un peso válido (ej: 72.5)");
+          return;
+        }
+        const dateKey = todayStr;
+        const newW = { ...weights, [dateKey]: val };
+        setWeights(newW);
+        await persist(habits, newW);
+        setWeightInput("");
+        showToast("¡Peso guardado! ¡Vas genial! 🌺", true);
+      };
+
+      const done = [todayHabits.diet, todayHabits.exercise, todayHabits.steps].filter(Boolean).length;
+
+      const chartData = Object.entries(weights)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, peso]) => ({ label: getWeekLabel(date), peso }));
+
+      const latestWeight = chartData.length ? chartData[chartData.length - 1].peso : null;
+      const firstWeight = chartData.length > 1 ? chartData[0].peso : null;
+      const diff = latestWeight && firstWeight ? (latestWeight - firstWeight).toFixed(1) : null;
+
+      const habitItems = [
+        { key: "diet", emoji: "🥗", label: "Dieta cumplida", sub: "¡Comiste bien hoy!" },
+        { key: "exercise", emoji: "🏃‍♀️", label: "Ejercicios hechos", sub: "¡El cuerpo te lo agradece!" },
+        { key: "steps", emoji: "👟", label: "10.000 pasos", sub: "¡Has movido el esqueleto!" },
+      ];
+
+      if (!loaded) return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", background: "#fdf6f0", fontFamily: "'Nunito', sans-serif" }}>
+          <div style={{ fontSize: 48 }}>🌸</div>
+          <p style={{ color: "#c47d6a", fontSize: 18, fontWeight: 700, marginTop: 12 }}>Cargando tu diario...</p>
+        </div>
+      );
+
+      return (
+        <div style={s.root}>
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+            * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+            input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+            input[type=number] { -moz-appearance: textfield; }
+            @keyframes pop { 0%{transform:scale(0.85);opacity:0} 60%{transform:scale(1.05)} 100%{transform:scale(1);opacity:1} }
+            @keyframes slide-up { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
+            .habit-btn:active { transform: scale(0.97); }
+          `}</style>
+
+          {/* HEADER */}
+          <div style={s.header}>
+            <div style={s.headerFlower}>🌸</div>
+            <h1 style={s.title}>Mi Diario de Salud</h1>
+            <p style={s.date}>{new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}</p>
+            {latestWeight && (
+              <div style={s.weightBadge}>
+                ⚖️ {latestWeight} kg
+                {diff && <span style={{ fontSize: 13, opacity: 0.85, marginLeft: 6 }}>{diff > 0 ? `+${diff}` : diff} desde el inicio</span>}
+              </div>
+            )}
+          </div>
+
+          {/* PROGRESS */}
+          <div style={s.progressWrap}>
+            <div style={s.progressRow}>
+              {[0, 1, 2].map(i => (
+                <div key={i} style={{ ...s.seg, background: i < done ? "#e09080" : "#f5d5cc", transition: "background 0.4s" }} />
+              ))}
+            </div>
+            <p style={s.progressLabel}>
+              {done === 0 && "¡Empieza tu día! 🌅"}
+              {done === 1 && "¡Buen comienzo! ✨"}
+              {done === 2 && "¡Casi lo tienes! 💫"}
+              {done === 3 && "¡Día perfecto! 🏆"}
+            </p>
+          </div>
+
+          {/* TOAST */}
+          {toast && (
+            <div style={{ ...s.toast, background: toast.special ? "#d4826f" : "#e8a598", animation: "pop 0.35s ease" }}>
+              {toast.msg}
+            </div>
+          )}
+
+          {/* TABS */}
+          <div style={s.tabs}>
+            {[["today", "📅 Hoy"], ["progress", "📈 Progreso"]].map(([id, label]) => (
+              <button key={id} onClick={() => setTab(id)} style={{ ...s.tab, background: tab === id ? "#e09080" : "transparent", color: tab === id ? "#fff" : "#c47d6a" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* TODAY TAB */}
+          {tab === "today" && (
+            <div style={s.panel}>
+              <p style={s.sectionHint}>Toca cada botón cuando lo hayas hecho</p>
+              {habitItems.map(({ key, emoji, label, sub }) => {
+                const isDone = todayHabits[key];
+                return (
+                  <button key={key} className="habit-btn" onClick={() => toggle(key)} style={{ ...s.habitBtn, background: isDone ? "linear-gradient(135deg,#e8a598,#d4826f)" : "#fff", border: isDone ? "none" : "2.5px solid #f0c4bb", boxShadow: isDone ? "0 4px 20px #e8a59840" : "0 2px 12px #f0c4bb30" }}>
+                    <span style={s.habitEmoji}>{emoji}</span>
+                    <div style={s.habitText}>
+                      <span style={{ ...s.habitLabel, color: isDone ? "#fff" : "#8b4a3c" }}>{label}</span>
+                      {isDone && <span style={s.habitSub}>{sub}</span>}
+                    </div>
+                    <div style={{ ...s.habitCircle, background: isDone ? "rgba(255,255,255,0.3)" : "#f5d5cc", color: isDone ? "#fff" : "#e09080" }}>
+                      {isDone ? "✓" : ""}
+                    </div>
+                  </button>
+                );
+              })}
+
+              {/* Weight entry */}
+              <div style={s.weightCard}>
+                <p style={s.weightTitle}>⚖️ Registrar peso</p>
+                <p style={s.weightHint}>Anótalo cuando quieras</p>
+                <div style={s.weightRow}>
+                  <input
+                    type="number"
+                    value={weightInput}
+                    onChange={e => setWeightInput(e.target.value)}
+                    placeholder="72.5"
+                    style={s.weightInput}
+                  />
+                  <span style={s.kgLabel}>kg</span>
+                  <button onClick={saveWeight} style={s.saveBtn}>Guardar</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PROGRESS TAB */}
+          {tab === "progress" && (
+            <div style={s.panel}>
+              {chartData.length >= 2 ? (
+                <React.Fragment>
+                  <p style={{ ...s.sectionHint, marginBottom: 16 }}>Tu evolución de peso 📉</p>
+                  <div style={s.chartWrap}>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <LineChart data={chartData} margin={{ top: 10, right: 16, left: -24, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f5d5cc" />
+                        <XAxis dataKey="label" tick={{ fontFamily: "Nunito", fontSize: 12, fill: "#c47d6a" }} />
+                        <YAxis domain={["auto", "auto"]} tick={{ fontFamily: "Nunito", fontSize: 12, fill: "#c47d6a" }} />
+                        <Tooltip
+                          contentStyle={{ fontFamily: "Nunito", borderRadius: 14, border: "none", background: "#fff5f0", boxShadow: "0 4px 20px #e8a59830" }}
+                          formatter={(v) => [`${v} kg`, "Peso"]}
+                        />
+                        <Line type="monotone" dataKey="peso" stroke="#e09080" strokeWidth={3} dot={{ fill: "#d4826f", r: 6, strokeWidth: 0 }} activeDot={{ r: 8 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {diff && (
+                    <div style={s.diffCard}>
+                      <span style={{ fontSize: 28 }}>{parseFloat(diff) <= 0 ? "🎉" : "💪"}</span>
+                      <div>
+                        <p style={s.diffTitle}>{parseFloat(diff) <= 0 ? "¡Has bajado!" : "Sin rendirse"}</p>
+                        <p style={s.diffNum}>{parseFloat(diff) <= 0 ? diff : `+${diff}`} kg desde que empezaste</p>
+                      </div>
+                    </div>
+                  )}
+                </React.Fragment>
+              ) : (
+                <div style={s.emptyState}>
+                  <div style={{ fontSize: 60 }}>📈</div>
+                  <p style={s.emptyTitle}>¡Aquí verás tu progreso!</p>
+                  <p style={s.emptyText}>Registra al menos 2 pesajes para ver la gráfica. ¡Ve a la pestaña de Hoy y anota tu peso!</p>
+                </div>
+              )}
+
+              {/* Habit history summary */}
+              <p style={{ ...s.sectionHint, marginTop: 24, marginBottom: 12 }}>Últimos días</p>
+              {Object.entries(habits)
+                .sort(([a], [b]) => b.localeCompare(a))
+                .slice(0, 7)
+                .map(([date, h]) => {
+                  const d = new Date(date + "T12:00:00");
+                  const label = date === todayStr ? "Hoy" : d.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
+                  const count = [h.diet, h.exercise, h.steps].filter(Boolean).length;
+                  return (
+                    <div key={date} style={s.histRow}>
+                      <span style={s.histDate}>{label}</span>
+                      <div style={s.histDots}>
+                        {["diet", "exercise", "steps"].map(k => (
+                          <div key={k} style={{ ...s.histDot, background: h[k] ? "#e09080" : "#f5d5cc" }} title={k} />
+                        ))}
+                      </div>
+                      <span style={{ ...s.histScore, color: count === 3 ? "#d4826f" : "#c4a89c" }}>
+                        {count === 3 ? "⭐ Perfecto" : `${count}/3`}
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+
+          <div style={s.footer}>
+            <p style={s.footerText}>💕 Cada día que lo intentas, ya estás ganando</p>
+          </div>
+        </div>
+      );
+    }
+
+    const s = {
+      root: { fontFamily: "'Nunito', sans-serif", background: "#fdf6f0", minHeight: "100vh", maxWidth: 480, margin: "0 auto", paddingBottom: 48 },
+      header: { background: "linear-gradient(155deg, #f7c5b5 0%, #fce0d5 60%, #fdf6f0 100%)", padding: "36px 24px 28px", textAlign: "center", borderRadius: "0 0 36px 36px" },
+      headerFlower: { fontSize: 52, marginBottom: 6 },
+      title: { fontSize: 30, fontWeight: 900, color: "#8b4a3c", letterSpacing: "-0.5px" },
+      date: { fontSize: 15, color: "#c47d6a", fontWeight: 600, marginTop: 4, textTransform: "capitalize" },
+      weightBadge: { display: "inline-flex", alignItems: "center", background: "rgba(255,255,255,0.6)", borderRadius: 24, padding: "6px 16px", marginTop: 12, fontSize: 16, fontWeight: 800, color: "#8b4a3c", backdropFilter: "blur(8px)" },
+      progressWrap: { padding: "16px 24px 4px" },
+      progressRow: { display: "flex", gap: 6, marginBottom: 6 },
+      seg: { flex: 1, height: 8, borderRadius: 8 },
+      progressLabel: { fontSize: 14, fontWeight: 700, color: "#c47d6a" },
+      toast: { margin: "4px 24px 0", color: "#fff", borderRadius: 18, padding: "14px 20px", textAlign: "center", fontSize: 18, fontWeight: 800, lineHeight: 1.3 },
+      tabs: { display: "flex", margin: "16px 24px 0", background: "#f5e8e4", borderRadius: 20, padding: 4, gap: 4 },
+      tab: { flex: 1, padding: "10px 0", borderRadius: 16, border: "none", fontSize: 15, fontWeight: 800, cursor: "pointer", transition: "all 0.2s", fontFamily: "'Nunito', sans-serif" },
+      panel: { padding: "16px 24px" },
+      sectionHint: { fontSize: 14, color: "#c47d6a", fontWeight: 600 },
+      habitBtn: { width: "100%", display: "flex", alignItems: "center", padding: "18px 16px", borderRadius: 22, marginBottom: 12, cursor: "pointer", gap: 14, transition: "all 0.22s", fontFamily: "'Nunito', sans-serif" },
+      habitEmoji: { fontSize: 32, flexShrink: 0 },
+      habitText: { flex: 1, textAlign: "left" },
+      habitLabel: { display: "block", fontSize: 18, fontWeight: 800, lineHeight: 1.2 },
+      habitSub: { display: "block", fontSize: 13, color: "rgba(255,255,255,0.85)", marginTop: 2, fontWeight: 600 },
+      habitCircle: { width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 900, flexShrink: 0, transition: "all 0.25s" },
+      weightCard: { background: "#fff", borderRadius: 22, padding: 20, border: "2.5px solid #f0c4bb", marginTop: 4 },
+      weightTitle: { fontSize: 18, fontWeight: 800, color: "#8b4a3c", marginBottom: 2 },
+      weightHint: { fontSize: 13, color: "#c47d6a", marginBottom: 12, fontWeight: 600 },
+      weightRow: { display: "flex", alignItems: "center", gap: 8 },
+      weightInput: { flex: 1, padding: "14px 16px", fontSize: 22, fontWeight: 800, border: "2.5px solid #f0c4bb", borderRadius: 16, background: "#fdf6f0", color: "#8b4a3c", fontFamily: "'Nunito', sans-serif", outline: "none", width: "100%" },
+      kgLabel: { fontSize: 18, fontWeight: 800, color: "#c47d6a" },
+      saveBtn: { padding: "14px 18px", background: "linear-gradient(135deg,#e8a598,#d4826f)", color: "#fff", border: "none", borderRadius: 16, fontSize: 16, fontWeight: 800, cursor: "pointer", fontFamily: "'Nunito', sans-serif", whiteSpace: "nowrap", boxShadow: "0 4px 16px #e8a59850" },
+      chartWrap: { background: "#fff", borderRadius: 22, padding: "16px 8px", border: "2.5px solid #f0c4bb" },
+      diffCard: { display: "flex", alignItems: "center", gap: 14, background: "#fff5f0", borderRadius: 18, padding: "14px 18px", marginTop: 12, border: "2px solid #f5d5cc" },
+      diffTitle: { fontSize: 15, fontWeight: 800, color: "#8b4a3c" },
+      diffNum: { fontSize: 14, color: "#c47d6a", fontWeight: 600 },
+      emptyState: { textAlign: "center", padding: "32px 16px" },
+      emptyTitle: { fontSize: 22, fontWeight: 800, color: "#8b4a3c", marginTop: 12, marginBottom: 8 },
+      emptyText: { fontSize: 15, color: "#c47d6a", fontWeight: 600, lineHeight: 1.5 },
+      histRow: { display: "flex", alignItems: "center", background: "#fff", borderRadius: 14, padding: "12px 14px", marginBottom: 8, gap: 12, border: "1.5px solid #f5e0d9" },
+      histDate: { fontSize: 13, fontWeight: 700, color: "#8b4a3c", width: 90, flexShrink: 0, textTransform: "capitalize" },
+      histDots: { display: "flex", gap: 6, flex: 1 },
+      histDot: { width: 14, height: 14, borderRadius: "50%", transition: "background 0.3s" },
+      histScore: { fontSize: 13, fontWeight: 800 },
+      footer: { textAlign: "center", padding: "20px 24px 0" },
+      footerText: { fontSize: 14, color: "#c4a89c", fontWeight: 600 },
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
